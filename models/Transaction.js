@@ -5,7 +5,14 @@ class Transaction {
   static async create(transactionData) {
     const { data, error } = await supabaseAdmin
       .from("transactions")
-      .insert(transactionData)
+      .insert({
+        user_id: transactionData.user_id,
+        amount: transactionData.amount,
+        currency: transactionData.currency || "USD",
+        flutterwave_tx_ref: transactionData.flutterwave_tx_ref, // changed from stripe_payment_intent
+        subscription_plan: transactionData.subscription_plan,
+        status: transactionData.status || "pending",
+      })
       .select()
       .single();
 
@@ -13,16 +20,28 @@ class Transaction {
     return data;
   }
 
-  // Update transaction by Stripe payment intent ID (admin client)
-  static async updateByPaymentIntent(paymentIntentId, updates) {
+  // Update transaction by ID (admin client)
+  static async update(id, updates) {
     const { data, error } = await supabaseAdmin
       .from("transactions")
       .update(updates)
-      .eq("stripe_payment_intent", paymentIntentId)
+      .eq("id", id)
       .select()
       .single();
 
     if (error) throw error;
+    return data;
+  }
+
+  // Find transaction by Flutterwave tx_ref (admin client)
+  static async findByTxRef(tx_ref) {
+    const { data, error } = await supabaseAdmin
+      .from("transactions")
+      .select("*")
+      .eq("flutterwave_tx_ref", tx_ref)
+      .maybeSingle();
+
+    if (error && error.code !== "PGRST116") throw error;
     return data;
   }
 
