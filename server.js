@@ -22,9 +22,9 @@ const app = express();
 const server = http.createServer(app);
 const io = socketIo(server, {
   cors: {
-    origin: process.env.FRONTEND_URL || "http://localhost:3000",
-    methods: ["GET", "POST"],
+    origin: true, // Will be handled by Express CORS middleware
     credentials: true,
+    methods: ["GET", "POST"],
   },
 });
 
@@ -40,10 +40,38 @@ app.use(
 );
 
 // CORS
- app.use(
+/*app.use(
   cors({
     origin: process.env.FRONTEND_URL || "http://localhost:3000",
     credentials: true,
+  }),
+);*/
+
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      const allowed = [
+        "http://127.0.0.1:5501",
+        "http://localhost",
+        "https://localhost",
+        "http://localhost:5500",
+        "http://127.0.0.1:5500",
+        "*",
+      ];
+      if (
+        !origin ||
+        allowed.includes(origin) ||
+        allowed.some((a) => origin?.startsWith(a))
+      ) {
+        callback(null, true);
+      } else {
+        callback(new Error("Not allowed by CORS"));
+      }
+    },
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+    optionsSuccessStatus: 204,
   }),
 );
 
