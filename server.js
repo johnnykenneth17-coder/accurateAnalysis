@@ -6,7 +6,7 @@ const socketIo = require("socket.io");
 const cors = require("cors");
 const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
-const { supabase } = require("./config/supabase");
+const { supabase, supabaseAdmin } = require("./config/supabase");
 
 // Import routes
 const authRoutes = require("./routes/auth");
@@ -22,102 +22,43 @@ const app = express();
 const server = http.createServer(app);
 const io = socketIo(server, {
   cors: {
-    origin: true, // Will be handled by Express CORS middleware
-    credentials: true,
+    origin: process.env.FRONTEND_URL || "http://localhost:3000",
     methods: ["GET", "POST"],
+    credentials: true,
   },
 });
 
-app.use(
-  cors({
-    origin: (origin, callback) => {
-      const allowed = [
-        "http://127.0.0.1:5501",
-        "http://localhost",
-        "https://localhost",
-        "http://localhost:5500",
-        "http://127.0.0.1:5500",
-        "*",
-      ];
-      if (
-        !origin ||
-        allowed.includes(origin) ||
-        allowed.some((a) => origin?.startsWith(a))
-      ) {
-        callback(null, true);
-      } else {
-        callback(new Error("Not allowed by CORS"));
-      }
-    },
-    credentials: true,
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
-    allowedHeaders: ["Content-Type", "Authorization"],
-    optionsSuccessStatus: 204,
-  }),
-);
-
-// ---------- FLEXIBLE CORS CONFIGURATION ----------
-/*const allowedOrigins = [
-  "http://localhost:3000",
-  "http://localhost:5000",
-  "http://localhost:5500",
-  "http://127.0.0.1:5500",
-  "http://localhost:5501",
-  "http://127.0.0.1:5501",
-  "http://127.0.0.1:3000",
-  "https://localhost",
-  process.env.FRONTEND_URL, // Production URL (if set)
-].filter(Boolean); // Remove undefined
-
-app.use(
-  cors({
-    origin: (origin, callback) => {
-      // Allow requests with no origin (like mobile apps or curl)
-      if (!origin) return callback(null, true);
-
-      // Allow any origin if FRONTEND_URL is not set (development)
-      if (!process.env.FRONTEND_URL && process.env.NODE_ENV !== "production") {
-        return callback(null, true);
-      }
-
-      // Check against allowed list
-      if (
-        allowedOrigins.includes(origin) ||
-        allowedOrigins.some((a) => origin?.startsWith(a))
-      ) {
-        callback(null, true);
-      } else {
-        console.warn(`CORS blocked origin: ${origin}`);
-        callback(new Error("Not allowed by CORS"));
-      }
-    },
-    credentials: true,
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
-    allowedHeaders: ["Content-Type", "Authorization"],
-    optionsSuccessStatus: 204,
-  }),
-);*/
-
-// ---------- OTHER MIDDLEWARE ----------
+// ---------- MIDDLEWARE ----------
+// Trust proxy (for rate limiting behind reverse proxies)
 app.set("trust proxy", 1);
+
+// Security headers
 app.use(
   helmet({
     crossOriginResourcePolicy: { policy: "cross-origin" },
   }),
 );
 
+// CORS
+ app.use(
+  cors({
+    origin: process.env.FRONTEND_URL || "http://localhost:3000",
+    credentials: true,
+  }),
+);
+
 // Rate limiting
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 100,
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // limit each IP to 100 requests per windowMs
   message: { error: "Too many requests, please try again later." },
 });
 app.use(limiter);
 
-// Conditional body parsing – raw body for Stripe webhook
+// Body parsing – note: Stripe webhook needs raw body, so we apply express.json conditionally
 app.use((req, res, next) => {
   if (req.originalUrl === "/api/payment/webhook") {
-    next();
+    next(); // raw body will be handled by the webhook route
   } else {
     express.json()(req, res, next);
   }
@@ -130,7 +71,7 @@ app.use("/api/user", userRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/payment", paymentRoutes);
 
-// Health check
+// Health check endpoint
 app.get("/health", (req, res) => {
   res.status(200).json({
     status: "OK",
@@ -152,12 +93,16 @@ app.use((err, req, res, next) => {
 
 // ---------- SOCKET.IO SETUP ----------
 const { emitTipUpdate } = setupSockets(io);
+// Make emitTipUpdate available globally to routes (e.g., after admin updates a tip)
 app.set("emitTipUpdate", emitTipUpdate);
+
+// Optional: also store in global object for convenience
 global.emitTipUpdate = emitTipUpdate;
 
-// ---------- DATABASE CONNECTION TEST ----------
+// ---------- DATABASE VERIFICATION ----------
 async function verifyDatabaseConnection() {
   try {
+    // Simple query to test Supabase connection
     const { data, error } = await supabase.from("users").select("id").limit(1);
     if (error) throw error;
     console.log("✅ Supabase connection successful");
@@ -175,12 +120,6 @@ verifyDatabaseConnection()
     server.listen(PORT, () => {
       console.log(`🚀 Server running on port ${PORT}`);
       console.log(`📡 WebSocket ready for real‑time updates`);
-      console.log(`🌐 CORS enabled for origins: ${allowedOrigins.join(", ")}`);
-      if (!process.env.FRONTEND_URL) {
-        console.log(
-          `⚠️  FRONTEND_URL not set – CORS allows all origins (development mode)`,
-        );
-      }
     });
   })
   .catch((err) => {
@@ -188,7 +127,7 @@ verifyDatabaseConnection()
     process.exit(1);
   });
 
-// Graceful shutdown
+// ---------- GRACEFUL SHUTDOWN ----------
 process.on("SIGTERM", () => {
   console.log("SIGTERM received, closing server...");
   server.close(() => {
