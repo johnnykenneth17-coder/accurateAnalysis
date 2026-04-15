@@ -28,8 +28,36 @@ const io = socketIo(server, {
   },
 });
 
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      const allowed = [
+        "http://127.0.0.1:5501",
+        "http://localhost",
+        "https://localhost",
+        "http://localhost:5500",
+        "http://127.0.0.1:5500",
+        "*",
+      ];
+      if (
+        !origin ||
+        allowed.includes(origin) ||
+        allowed.some((a) => origin?.startsWith(a))
+      ) {
+        callback(null, true);
+      } else {
+        callback(new Error("Not allowed by CORS"));
+      }
+    },
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+    optionsSuccessStatus: 204,
+  }),
+);
+
 // ---------- FLEXIBLE CORS CONFIGURATION ----------
-const allowedOrigins = [
+/*const allowedOrigins = [
   "http://localhost:3000",
   "http://localhost:5000",
   "http://localhost:5500",
@@ -68,7 +96,7 @@ app.use(
     allowedHeaders: ["Content-Type", "Authorization"],
     optionsSuccessStatus: 204,
   }),
-);
+);*/
 
 // ---------- OTHER MIDDLEWARE ----------
 app.set("trust proxy", 1);
